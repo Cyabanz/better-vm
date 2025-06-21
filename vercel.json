@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/hyperbeam/create.js": { "runtime": "edge" },
+    "api/hyperbeam/terminate.js": { "runtime": "edge" },
+    "api/hyperbeam/csrf-token.js": { "runtime": "edge" }
+  }
+}
