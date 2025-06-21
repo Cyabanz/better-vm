@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hyperbeam VM Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <style>
+    body { font-family: Inter, Arial, sans-serif; background: #0a111d; color: #fff; margin: 0; min-height: 100vh; display: flex; justify-content: center; align-items: center; }
+    #container { background: rgba(255,255,255,0.06); border-radius: 14px; padding: 2em 2.5em; box-shadow: 0 8px 32px #0002; min-width: 340px; }
+    h1 { font-size: 2em; font-weight: 700; margin-top: 0; }
+    #hyperbeam { width: 100%; height: 400px; border: none; margin-top: 1.5em; border-radius: 8px; display: none; }
+    #controls { margin-top: 2em; display: flex; gap: 1em; }
+    button { background: #4c75f2; color: #fff; border: none; border-radius: 10px; padding: 0.9em 2em; font-size: 1.1em; font-weight: 600; cursor: pointer; transition: all 0.18s;}
+    button:disabled { background: #555; cursor: not-allowed; }
+    #message { min-height: 1.5em; margin: 1em 0 0.5em 0; color: #ffbaba; }
+    #timer { margin-left: 1em; color: #4c75f2; font-weight: 700; letter-spacing: 1px; }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <h1>Hyperbeam VM Demo</h1>
+    <div id="message"></div>
+    <div id="controls">
+      <button id="startBtn">Start Session</button>
+      <button id="endBtn" style="display:none;">End Session</button>
+      <span id="timer"></span>
+    </div>
+    <iframe id="hyperbeam" allow="autoplay; clipboard-write; clipboard-read"></iframe>
+  </div>
+  <script>
+    // Configuration
+    const ADMIN_UID = 'admin1234'; // Change as needed or get from env
+    let sessionId = null, embedUrl = null, timerInterval = null, timeLeft = 300, csrfToken = null;
+
+    // DOM elements
+    const startBtn = document.getElementById('startBtn');
+    const endBtn = document.getElementById('endBtn');
+    const hyperbeam = document.getElementById('hyperbeam');
+    const message = document.getElementById('message');
+    const timer = document.getElementById('timer');
+    const uid = prompt("Enter your UID (use 'admin1234' for admin):", localStorage.getItem('uid') || '') || Math.random().toString(36).slice(2);
+    localStorage.setItem('uid', uid);
+
+    // Get CSRF token and set cookie
+    async function getCSRF() {
+      const res = await fetch('/api/hyperbeam/csrf-token');
+      const data = await res.json();
+      csrfToken = data.csrfToken;
+    }
+
+    // Start session handler
+    startBtn.onclick = async () => {
+      message.textContent = '';
+      await getCSRF();
+      startBtn.disabled = true;
+      try {
+        const res = await fetch('/api/hyperbeam/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
+          body: JSON.stringify({ uid })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to start session');
+        sessionId = data.session_id;
+        embedUrl = data.embed_url;
+        timeLeft = 300; // 5 min
+        showSession();
+      } catch (e) {
+        message.textContent = e.message;
+        startBtn.disabled = false;
+      }
+    };
+
+    // Show session iframe and start timer
+    function showSession() {
+      hyperbeam.style.display = '';
+      hyperbeam.src = embedUrl;
+      endBtn.style.display = '';
+      startBtn.style.display = 'none';
+      timer.textContent = `05:00`;
+      timerInterval = setInterval(() => {
+        timeLeft--;
+        const min = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+        const sec = String(timeLeft % 60).padStart(2, '0');
+        timer.textContent = min + ':' + sec;
+        if (timeLeft <= 0) endSession();
+      }, 1000);
+    }
+
+    // End session handler
+    endBtn.onclick = () => endSession();
+
+    // Terminate session (manual or on unload)
+    async function endSession() {
+      if (!sessionId) return;
+      endBtn.disabled = true;
+      timer.textContent = '';
+      try {
+        await getCSRF();
+        await fetch('/api/hyperbeam/terminate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
+          body: JSON.stringify({ sessionId, uid })
+        });
+      } catch (e) { /* ignore */ }
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = null;
+      hyperbeam.src = '';
+      hyperbeam.style.display = 'none';
+      endBtn.style.display = 'none';
+      startBtn.style.display = '';
+      startBtn.disabled = false;
+      message.textContent = 'Session ended.';
+      sessionId = null;
+    }
+
+    // End session on page unload
+    window.addEventListener('beforeunload', () => {
+      if (sessionId) {
+        navigator.sendBeacon('/api/hyperbeam/terminate', JSON.stringify({ sessionId, uid, csrfToken }));
+      }
+    });
+  </script>
+</body>
+</html>
